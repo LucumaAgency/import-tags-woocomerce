@@ -7,17 +7,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 $import_result = null;
 
 if ( isset( $_POST['itwc_import_submit'] ) ) {
-    $separator     = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
-    $importer      = new ITWC_CSV_Importer( $separator );
-    $import_result = $importer->process_upload();
+    $separator      = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
+    $acf_field_name = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_POST['itwc_acf_field'] ) : '';
+    $importer       = new ITWC_CSV_Importer( $separator, $acf_field_name );
+    $import_result  = $importer->process_upload();
 }
 
 $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
+$current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_POST['itwc_acf_field'] ) : '';
 ?>
 
 <div class="wrap itwc-wrap">
-    <h1>Importar Etiquetas de Productos</h1>
-    <p>Sube un archivo CSV con las columnas <strong>ID</strong>, <strong>Title</strong> y <strong>Product Tags</strong> para asignar etiquetas a tus productos de WooCommerce.</p>
+    <h1>Importar Etiquetas y Recomendaciones</h1>
+    <p>Sube un archivo CSV con las columnas <strong>ID</strong>, <strong>Title</strong>, y opcionalmente <strong>Product Tags</strong> y/o <strong>Recommended Products</strong>.</p>
 
     <div class="itwc-card">
         <h2>Subir archivo CSV</h2>
@@ -28,14 +30,21 @@ $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_
                     <th scope="row"><label for="itwc_csv_file">Archivo CSV</label></th>
                     <td>
                         <input type="file" name="itwc_csv_file" id="itwc_csv_file" accept=".csv" required />
-                        <p class="description">Formato esperado: ID, Title, Product Tags.</p>
+                        <p class="description">Columnas requeridas: ID, Title. Opcionales: Product Tags, Recommended Products.</p>
                     </td>
                 </tr>
                 <tr>
                     <th scope="row"><label for="itwc_separator">Separador de etiquetas</label></th>
                     <td>
                         <input type="text" name="itwc_separator" id="itwc_separator" value="<?php echo esc_attr( $current_separator ); ?>" class="small-text" maxlength="5" />
-                        <p class="description">Carácter que separa las etiquetas dentro del campo "Product Tags". Ejemplos: <code>,</code> <code>|</code> <code>;</code></p>
+                        <p class="description">Carácter que separa valores dentro de "Product Tags" y "Recommended Products". Ejemplos: <code>,</code> <code>|</code> <code>;</code></p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="itwc_acf_field">Campo ACF (Recomendaciones)</label></th>
+                    <td>
+                        <input type="text" name="itwc_acf_field" id="itwc_acf_field" value="<?php echo esc_attr( $current_acf_field ); ?>" class="regular-text" placeholder="ej: producto_recomendado" />
+                        <p class="description">Nombre del campo ACF Relationship donde se guardan las recomendaciones. Solo necesario si el CSV tiene la columna "Recommended Products".</p>
                     </td>
                 </tr>
             </table>
@@ -67,6 +76,7 @@ $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_
                             <th>ID</th>
                             <th>Producto</th>
                             <th>Etiquetas</th>
+                            <th>Recomendaciones</th>
                             <th>Estado</th>
                             <th>Detalle</th>
                         </tr>
@@ -77,6 +87,7 @@ $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_
                                 <td><?php echo intval( $row['id'] ); ?></td>
                                 <td><?php echo esc_html( $row['title'] ); ?></td>
                                 <td><?php echo esc_html( $row['tags'] ); ?></td>
+                                <td><?php echo esc_html( isset( $row['recommendations'] ) ? $row['recommendations'] : '' ); ?></td>
                                 <td>
                                     <?php
                                     $status_labels = array(
@@ -103,10 +114,10 @@ $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_
 <script>
 document.getElementById('itwc-download-example').addEventListener('click', function(e) {
     e.preventDefault();
-    var csv = 'ID,Title,Product Tags\n';
-    csv += '101,Producto Ejemplo 1,"etiqueta1, etiqueta2, etiqueta3"\n';
-    csv += '102,Producto Ejemplo 2,"oferta, nuevo"\n';
-    csv += '103,Producto Ejemplo 3,"destacado"\n';
+    var csv = 'ID,Title,Product Tags,Recommended Products\n';
+    csv += '101,Camisa Azul,"etiqueta1, etiqueta2","Pantalon Negro, Zapatos Rojos"\n';
+    csv += '102,Pantalon Negro,"oferta, nuevo","Camisa Azul"\n';
+    csv += '103,Zapatos Rojos,"destacado","Camisa Azul, Pantalon Negro"\n';
 
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     var link = document.createElement('a');

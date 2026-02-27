@@ -9,18 +9,30 @@ class ITWC_CSV_Importer {
     /**
      * Columnas requeridas en el CSV.
      */
-    private const REQUIRED_COLUMNS = array( 'ID', 'Title', 'Product Tags' );
+    private const REQUIRED_COLUMNS = array( 'ID', 'Title' );
 
     /**
-     * Separador de etiquetas.
+     * Separador de etiquetas/recomendaciones.
      */
     private $separator;
 
     /**
-     * @param string $separator Carácter separador de etiquetas.
+     * Nombre del campo ACF Relationship.
      */
-    public function __construct( $separator = ',' ) {
-        $this->separator = $separator;
+    private $acf_field_name;
+
+    /**
+     * Cache de búsqueda de productos por nombre => ID.
+     */
+    private $product_name_cache = array();
+
+    /**
+     * @param string $separator      Carácter separador.
+     * @param string $acf_field_name Nombre del campo ACF Relationship.
+     */
+    public function __construct( $separator = ',', $acf_field_name = '' ) {
+        $this->separator      = $separator;
+        $this->acf_field_name = sanitize_text_field( $acf_field_name );
     }
 
     /**
@@ -48,17 +60,25 @@ class ITWC_CSV_Importer {
             return $this->error( 'El archivo debe ser un CSV (.csv).' );
         }
 
-        $rows = $this->parse_csv( $file['tmp_name'] );
+        $parsed = $this->parse_csv( $file['tmp_name'] );
 
-        if ( is_string( $rows ) ) {
-            return $this->error( $rows );
+        if ( is_string( $parsed ) ) {
+            return $this->error( $parsed );
         }
+
+        $rows        = $parsed['rows'];
+        $has_tags    = $parsed['has_tags'];
+        $has_recommendations = $parsed['has_recommendations'];
 
         if ( empty( $rows ) ) {
             return $this->error( 'El archivo CSV está vacío o no contiene filas de datos.' );
         }
 
-        return $this->import_tags( $rows );
+        if ( $has_recommendations && empty( $this->acf_field_name ) ) {
+            return $this->error( 'El CSV contiene la columna "Recommended Products" pero no se indicó el nombre del campo ACF.' );
+        }
+
+        return $this->import_rows( $rows, $has_tags, $has_recommendations );
     }
 
     /**
@@ -96,9 +116,20 @@ class ITWC_CSV_Importer {
             }
         }
 
-        $id_index   = array_search( 'ID', $header, true );
+        $id_index    = array_search( 'ID', $header, true );
         $title_index = array_search( 'Title', $header, true );
+
+        // Columnas opcionales
         $tags_index  = array_search( 'Product Tags', $header, true );
+        $rec_index   = array_search( 'Recommended Products', $header, true );
+
+        $has_tags            = false !== $tags_index;
+        $has_recommendations = false !== $rec_index;
+
+        if ( ! $has_tags && ! $has_recommendations ) {
+            fclose( $handle );
+            return 'El CSV debe contener al menos una de estas columnas: "Product Tags", "Recommended Products".';
+        }
 
         $rows = array();
         $line = 1;
@@ -106,105 +137,149 @@ class ITWC_CSV_Importer {
         while ( ( $data = fgetcsv( $handle ) ) !== false ) {
             $line++;
 
-            if ( count( $data ) < count( $header ) ) {
+            if ( count( $data ) <= max( $id_index, $title_index ) ) {
                 continue;
             }
 
             $id   = trim( $data[ $id_index ] );
             $title = trim( $data[ $title_index ] );
-            $tags  = trim( $data[ $tags_index ] );
 
             if ( empty( $id ) ) {
                 continue;
             }
 
-            $rows[] = array(
+            $row_data = array(
                 'line'  => $line,
                 'id'    => intval( $id ),
                 'title' => sanitize_text_field( $title ),
-                'tags'  => $tags,
+                'tags'  => $has_tags && isset( $data[ $tags_index ] ) ? trim( $data[ $tags_index ] ) : '',
+                'recommendations' => $has_recommendations && isset( $data[ $rec_index ] ) ? trim( $data[ $rec_index ] ) : '',
             );
+
+            $rows[] = $row_data;
         }
 
         fclose( $handle );
 
-        return $rows;
+        return array(
+            'rows'                => $rows,
+            'has_tags'            => $has_tags,
+            'has_recommendations' => $has_recommendations,
+        );
     }
 
     /**
-     * Importa las etiquetas a los productos de WooCommerce.
+     * Importa etiquetas y/o recomendaciones a los productos.
      *
-     * @param array $rows Filas parseadas del CSV.
+     * @param array $rows                Filas parseadas del CSV.
+     * @param bool  $has_tags            Si el CSV tiene columna Product Tags.
+     * @param bool  $has_recommendations Si el CSV tiene columna Recommended Products.
      * @return array Resultado de la importación.
      */
-    private function import_tags( $rows ) {
-        $results  = array();
-        $success  = 0;
-        $errors   = 0;
+    private function import_rows( $rows, $has_tags, $has_recommendations ) {
+        $results = array();
+        $success = 0;
+        $errors  = 0;
 
         foreach ( $rows as $row ) {
             $product = wc_get_product( $row['id'] );
 
             if ( ! $product ) {
                 $results[] = array(
-                    'id'     => $row['id'],
-                    'title'  => $row['title'],
-                    'tags'   => $row['tags'],
-                    'status' => 'error',
-                    'message' => 'Producto no encontrado.',
+                    'id'              => $row['id'],
+                    'title'           => $row['title'],
+                    'tags'            => $row['tags'],
+                    'recommendations' => $row['recommendations'],
+                    'status'          => 'error',
+                    'message'         => 'Producto no encontrado.',
                 );
                 $errors++;
                 continue;
             }
 
-            if ( empty( $row['tags'] ) ) {
+            // Resolver al producto padre si es una variación
+            $parent_id = $row['id'];
+            if ( $product->is_type( 'variation' ) ) {
+                $parent_id = $product->get_parent_id();
+            }
+
+            $messages    = array();
+            $row_success = true;
+
+            // --- Importar etiquetas ---
+            if ( $has_tags && ! empty( $row['tags'] ) ) {
+                $tags = array_map( 'trim', explode( $this->separator, $row['tags'] ) );
+                $tags = array_filter( $tags );
+                $tags = array_map( 'sanitize_text_field', $tags );
+
+                if ( ! empty( $tags ) ) {
+                    $tag_result = wp_set_object_terms( $parent_id, $tags, 'product_tag', true );
+                    if ( is_wp_error( $tag_result ) ) {
+                        $messages[]  = 'Tags error: ' . $tag_result->get_error_message();
+                        $row_success = false;
+                    } else {
+                        $messages[] = count( $tags ) . ' etiqueta(s)';
+                    }
+                }
+            }
+
+            // --- Importar recomendaciones ACF ---
+            if ( $has_recommendations && ! empty( $row['recommendations'] ) ) {
+                $rec_names = array_map( 'trim', explode( $this->separator, $row['recommendations'] ) );
+                $rec_names = array_filter( $rec_names );
+
+                if ( ! empty( $rec_names ) ) {
+                    $rec_ids    = array();
+                    $not_found  = array();
+
+                    foreach ( $rec_names as $name ) {
+                        $found_id = $this->find_product_id_by_name( $name );
+                        if ( $found_id ) {
+                            $rec_ids[] = $found_id;
+                        } else {
+                            $not_found[] = $name;
+                        }
+                    }
+
+                    if ( ! empty( $rec_ids ) ) {
+                        update_field( $this->acf_field_name, $rec_ids, $parent_id );
+                        $messages[] = count( $rec_ids ) . ' recomendación(es)';
+                    }
+
+                    if ( ! empty( $not_found ) ) {
+                        $messages[]  = 'No encontrados: ' . implode( ', ', $not_found );
+                        $row_success = empty( $rec_ids ) ? false : $row_success;
+                    }
+                }
+            }
+
+            if ( empty( $messages ) ) {
                 $results[] = array(
-                    'id'     => $row['id'],
-                    'title'  => $product->get_name(),
-                    'tags'   => '',
-                    'status' => 'skipped',
-                    'message' => 'Sin etiquetas para importar.',
+                    'id'              => $row['id'],
+                    'title'           => $product->get_name(),
+                    'tags'            => $row['tags'],
+                    'recommendations' => $row['recommendations'],
+                    'status'          => 'skipped',
+                    'message'         => 'Sin datos para importar.',
                 );
                 continue;
             }
 
-            // Separar etiquetas por el separador configurado y limpiar
-            $tags = array_map( 'trim', explode( $this->separator, $row['tags'] ) );
-            $tags = array_filter( $tags );
-            $tags = array_map( 'sanitize_text_field', $tags );
-
-            if ( empty( $tags ) ) {
-                $results[] = array(
-                    'id'     => $row['id'],
-                    'title'  => $product->get_name(),
-                    'tags'   => $row['tags'],
-                    'status' => 'skipped',
-                    'message' => 'Sin etiquetas válidas.',
-                );
-                continue;
-            }
-
-            $result = wp_set_object_terms( $row['id'], $tags, 'product_tag', true );
-
-            if ( is_wp_error( $result ) ) {
-                $results[] = array(
-                    'id'     => $row['id'],
-                    'title'  => $product->get_name(),
-                    'tags'   => implode( ', ', $tags ),
-                    'status' => 'error',
-                    'message' => $result->get_error_message(),
-                );
-                $errors++;
-            } else {
-                $results[] = array(
-                    'id'     => $row['id'],
-                    'title'  => $product->get_name(),
-                    'tags'   => implode( ', ', $tags ),
-                    'status' => 'success',
-                    'message' => count( $tags ) . ' etiqueta(s) importada(s).',
-                );
+            $status = $row_success ? 'success' : 'error';
+            if ( $row_success ) {
                 $success++;
+            } else {
+                $errors++;
             }
+
+            $results[] = array(
+                'id'              => $row['id'],
+                'title'           => $product->get_name(),
+                'tags'            => $row['tags'],
+                'recommendations' => $row['recommendations'],
+                'status'          => $status,
+                'message'         => implode( ' | ', $messages ),
+            );
         }
 
         return array(
@@ -222,6 +297,57 @@ class ITWC_CSV_Importer {
                 'errors'  => $errors,
             ),
         );
+    }
+
+    /**
+     * Busca un producto padre por nombre exacto y retorna su ID.
+     * Usa cache para evitar queries repetidos.
+     *
+     * @param string $name Nombre del producto.
+     * @return int|false ID del producto o false si no se encuentra.
+     */
+    private function find_product_id_by_name( $name ) {
+        $name = sanitize_text_field( $name );
+        $cache_key = mb_strtolower( $name );
+
+        if ( isset( $this->product_name_cache[ $cache_key ] ) ) {
+            return $this->product_name_cache[ $cache_key ];
+        }
+
+        global $wpdb;
+
+        // Buscar entre productos padres (no variaciones)
+        $product_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title = %s
+             AND post_type = 'product'
+             AND post_status IN ('publish', 'draft', 'private')
+             LIMIT 1",
+            $name
+        ) );
+
+        if ( $product_id ) {
+            $this->product_name_cache[ $cache_key ] = intval( $product_id );
+            return intval( $product_id );
+        }
+
+        // Intentar búsqueda flexible (LIKE) si no hay match exacto
+        $product_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title LIKE %s
+             AND post_type = 'product'
+             AND post_status IN ('publish', 'draft', 'private')
+             LIMIT 1",
+            $name
+        ) );
+
+        if ( $product_id ) {
+            $this->product_name_cache[ $cache_key ] = intval( $product_id );
+            return intval( $product_id );
+        }
+
+        $this->product_name_cache[ $cache_key ] = false;
+        return false;
     }
 
     /**
