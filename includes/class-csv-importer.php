@@ -27,6 +27,11 @@ class ITWC_CSV_Importer {
     private $product_name_cache = array();
 
     /**
+     * Log de debug.
+     */
+    private $debug_log = array();
+
+    /**
      * @param string $separator      Carácter separador.
      * @param string $acf_field_name Nombre del campo ACF Relationship.
      */
@@ -126,6 +131,13 @@ class ITWC_CSV_Importer {
         $has_tags            = false !== $tags_index;
         $has_recommendations = false !== $rec_index;
 
+        $this->debug_log[] = '=== PARSE CSV ===';
+        $this->debug_log[] = 'Headers encontrados: ' . wp_json_encode( $header );
+        $this->debug_log[] = 'Columna Product Tags: ' . ( $has_tags ? 'SI (index ' . $tags_index . ')' : 'NO' );
+        $this->debug_log[] = 'Columna Recommended Products: ' . ( $has_recommendations ? 'SI (index ' . $rec_index . ')' : 'NO' );
+        $this->debug_log[] = 'Separador configurado: "' . $this->separator . '"';
+        $this->debug_log[] = 'Campo ACF: "' . $this->acf_field_name . '"';
+
         if ( ! $has_tags && ! $has_recommendations ) {
             fclose( $handle );
             return 'El CSV debe contener al menos una de estas columnas: "Product Tags", "Recommended Products".';
@@ -148,12 +160,20 @@ class ITWC_CSV_Importer {
                 continue;
             }
 
+            $tags_val = $has_tags && isset( $data[ $tags_index ] ) ? trim( $data[ $tags_index ] ) : '';
+            $rec_val  = $has_recommendations && isset( $data[ $rec_index ] ) ? trim( $data[ $rec_index ] ) : '';
+
+            $this->debug_log[] = sprintf(
+                'Fila %d: ID=%s | Title="%s" | Tags="%s" | Rec="%s" | Raw data=%s',
+                $line, $id, $title, $tags_val, $rec_val, wp_json_encode( $data )
+            );
+
             $row_data = array(
                 'line'  => $line,
                 'id'    => intval( $id ),
                 'title' => sanitize_text_field( $title ),
-                'tags'  => $has_tags && isset( $data[ $tags_index ] ) ? trim( $data[ $tags_index ] ) : '',
-                'recommendations' => $has_recommendations && isset( $data[ $rec_index ] ) ? trim( $data[ $rec_index ] ) : '',
+                'tags'  => $tags_val,
+                'recommendations' => $rec_val,
             );
 
             $rows[] = $row_data;
@@ -232,12 +252,17 @@ class ITWC_CSV_Importer {
                     $rec_ids    = array();
                     $not_found  = array();
 
+                    $this->debug_log[] = sprintf( '--- Producto ID %d: buscando recomendaciones ---', $row['id'] );
+                    $this->debug_log[] = 'Nombres a buscar: ' . wp_json_encode( $rec_names );
+
                     foreach ( $rec_names as $name ) {
                         $found_id = $this->find_product_id_by_name( $name );
                         if ( $found_id ) {
                             $rec_ids[] = $found_id;
+                            $this->debug_log[] = sprintf( '  "%s" => encontrado ID %d', $name, $found_id );
                         } else {
                             $not_found[] = $name;
+                            $this->debug_log[] = sprintf( '  "%s" => NO ENCONTRADO', $name );
                         }
                     }
 
@@ -290,12 +315,13 @@ class ITWC_CSV_Importer {
                 $errors,
                 count( $rows )
             ),
-            'results' => $results,
-            'summary' => array(
+            'results'   => $results,
+            'summary'   => array(
                 'total'   => count( $rows ),
                 'success' => $success,
                 'errors'  => $errors,
             ),
+            'debug_log' => $this->debug_log,
         );
     }
 
@@ -307,77 +333,100 @@ class ITWC_CSV_Importer {
      * @return int|false ID del producto padre o false.
      */
     private function find_product_id_by_name( $name ) {
+        $original_name = $name;
         $name = sanitize_text_field( $name );
         $cache_key = mb_strtolower( $name );
 
+        $this->debug_log[] = sprintf( '    [BUSCAR] original="%s" | sanitized="%s" | len=%d | hex=%s',
+            $original_name, $name, mb_strlen( $name ), bin2hex( mb_substr( $original_name, 0, 50 ) )
+        );
+
         if ( isset( $this->product_name_cache[ $cache_key ] ) ) {
+            $this->debug_log[] = '    [CACHE] hit => ' . var_export( $this->product_name_cache[ $cache_key ], true );
             return $this->product_name_cache[ $cache_key ];
         }
 
         global $wpdb;
 
         // 1. Buscar match exacto en productos padres
-        $product_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts}
+        $sql1 = $wpdb->prepare(
+            "SELECT ID, post_title FROM {$wpdb->posts}
              WHERE post_title = %s
              AND post_type = 'product'
              AND post_status IN ('publish', 'draft', 'private')
              LIMIT 1",
             $name
-        ) );
+        );
+        $row1 = $wpdb->get_row( $sql1 );
+        $this->debug_log[] = '    [Q1 exact product] SQL: ' . $sql1;
+        $this->debug_log[] = '    [Q1 result] ' . ( $row1 ? sprintf( 'ID=%s title="%s"', $row1->ID, $row1->post_title ) : 'NULL' );
 
-        if ( $product_id ) {
-            return $this->cache_and_return( $cache_key, intval( $product_id ) );
+        if ( $row1 ) {
+            return $this->cache_and_return( $cache_key, intval( $row1->ID ) );
         }
 
         // 2. Buscar match exacto en variaciones → resolver al padre
-        $variation_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts}
+        $sql2 = $wpdb->prepare(
+            "SELECT ID, post_title FROM {$wpdb->posts}
              WHERE post_title = %s
              AND post_type = 'product_variation'
              AND post_status IN ('publish', 'draft', 'private')
              LIMIT 1",
             $name
-        ) );
+        );
+        $row2 = $wpdb->get_row( $sql2 );
+        $this->debug_log[] = '    [Q2 exact variation] ' . ( $row2 ? sprintf( 'ID=%s title="%s"', $row2->ID, $row2->post_title ) : 'NULL' );
 
-        if ( $variation_id ) {
-            $parent_id = wp_get_post_parent_id( $variation_id );
+        if ( $row2 ) {
+            $parent_id = wp_get_post_parent_id( $row2->ID );
             if ( $parent_id ) {
                 return $this->cache_and_return( $cache_key, intval( $parent_id ) );
             }
         }
 
         // 3. Búsqueda LIKE flexible en productos padres
-        $product_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts}
+        $like_pattern = '%' . $wpdb->esc_like( $name ) . '%';
+        $sql3 = $wpdb->prepare(
+            "SELECT ID, post_title FROM {$wpdb->posts}
              WHERE post_title LIKE %s
              AND post_type = 'product'
              AND post_status IN ('publish', 'draft', 'private')
-             LIMIT 1",
-            '%' . $wpdb->esc_like( $name ) . '%'
-        ) );
+             LIMIT 5",
+            $like_pattern
+        );
+        $rows3 = $wpdb->get_results( $sql3 );
+        $this->debug_log[] = '    [Q3 LIKE product] pattern="' . $like_pattern . '" results=' . count( $rows3 );
+        foreach ( $rows3 as $r ) {
+            $this->debug_log[] = sprintf( '      -> ID=%s title="%s"', $r->ID, $r->post_title );
+        }
 
-        if ( $product_id ) {
-            return $this->cache_and_return( $cache_key, intval( $product_id ) );
+        if ( ! empty( $rows3 ) ) {
+            return $this->cache_and_return( $cache_key, intval( $rows3[0]->ID ) );
         }
 
         // 4. Búsqueda LIKE flexible en variaciones → resolver al padre
-        $variation_id = $wpdb->get_var( $wpdb->prepare(
-            "SELECT ID FROM {$wpdb->posts}
+        $sql4 = $wpdb->prepare(
+            "SELECT ID, post_title FROM {$wpdb->posts}
              WHERE post_title LIKE %s
              AND post_type = 'product_variation'
              AND post_status IN ('publish', 'draft', 'private')
-             LIMIT 1",
-            '%' . $wpdb->esc_like( $name ) . '%'
-        ) );
+             LIMIT 5",
+            $like_pattern
+        );
+        $rows4 = $wpdb->get_results( $sql4 );
+        $this->debug_log[] = '    [Q4 LIKE variation] results=' . count( $rows4 );
+        foreach ( $rows4 as $r ) {
+            $this->debug_log[] = sprintf( '      -> ID=%s title="%s"', $r->ID, $r->post_title );
+        }
 
-        if ( $variation_id ) {
-            $parent_id = wp_get_post_parent_id( $variation_id );
+        if ( ! empty( $rows4 ) ) {
+            $parent_id = wp_get_post_parent_id( $rows4[0]->ID );
             if ( $parent_id ) {
                 return $this->cache_and_return( $cache_key, intval( $parent_id ) );
             }
         }
 
+        $this->debug_log[] = '    [RESULTADO] NO ENCONTRADO';
         $this->product_name_cache[ $cache_key ] = false;
         return false;
     }

@@ -111,6 +111,16 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
     <?php endif; ?>
 </div>
 
+<?php if ( $import_result && ! empty( $import_result['debug_log'] ) ) : ?>
+<script>
+console.group('%c[ITWC DEBUG] Import Tags WooCommerce', 'color: #0073aa; font-weight: bold; font-size: 14px;');
+<?php foreach ( $import_result['debug_log'] as $log_line ) : ?>
+console.log(<?php echo wp_json_encode( $log_line ); ?>);
+<?php endforeach; ?>
+console.groupEnd();
+</script>
+<?php endif; ?>
+
 <script>
 document.getElementById('itwc-download-example').addEventListener('click', function(e) {
     e.preventDefault();
