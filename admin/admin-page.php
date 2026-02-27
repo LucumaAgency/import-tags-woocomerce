@@ -7,9 +7,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 $import_result = null;
 
 if ( isset( $_POST['itwc_import_submit'] ) ) {
-    $importer      = new ITWC_CSV_Importer();
+    $separator     = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
+    $importer      = new ITWC_CSV_Importer( $separator );
     $import_result = $importer->process_upload();
 }
+
+$current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
 ?>
 
 <div class="wrap itwc-wrap">
@@ -25,7 +28,14 @@ if ( isset( $_POST['itwc_import_submit'] ) ) {
                     <th scope="row"><label for="itwc_csv_file">Archivo CSV</label></th>
                     <td>
                         <input type="file" name="itwc_csv_file" id="itwc_csv_file" accept=".csv" required />
-                        <p class="description">Formato esperado: ID, Title, Product Tags. Las etiquetas múltiples se separan por coma.</p>
+                        <p class="description">Formato esperado: ID, Title, Product Tags.</p>
+                    </td>
+                </tr>
+                <tr>
+                    <th scope="row"><label for="itwc_separator">Separador de etiquetas</label></th>
+                    <td>
+                        <input type="text" name="itwc_separator" id="itwc_separator" value="<?php echo esc_attr( $current_separator ); ?>" class="small-text" maxlength="5" />
+                        <p class="description">Carácter que separa las etiquetas dentro del campo "Product Tags". Ejemplos: <code>,</code> <code>|</code> <code>;</code></p>
                     </td>
                 </tr>
             </table>

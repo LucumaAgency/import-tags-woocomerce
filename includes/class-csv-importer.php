@@ -12,6 +12,18 @@ class ITWC_CSV_Importer {
     private const REQUIRED_COLUMNS = array( 'ID', 'Title', 'Product Tags' );
 
     /**
+     * Separador de etiquetas.
+     */
+    private $separator;
+
+    /**
+     * @param string $separator Carácter separador de etiquetas.
+     */
+    public function __construct( $separator = ',' ) {
+        $this->separator = $separator;
+    }
+
+    /**
      * Procesa el archivo CSV subido.
      *
      * @return array Resultado con 'success', 'message', y 'results'.
@@ -156,8 +168,8 @@ class ITWC_CSV_Importer {
                 continue;
             }
 
-            // Separar etiquetas por coma y limpiar
-            $tags = array_map( 'trim', explode( ',', $row['tags'] ) );
+            // Separar etiquetas por el separador configurado y limpiar
+            $tags = array_map( 'trim', explode( $this->separator, $row['tags'] ) );
             $tags = array_filter( $tags );
             $tags = array_map( 'sanitize_text_field', $tags );
 
