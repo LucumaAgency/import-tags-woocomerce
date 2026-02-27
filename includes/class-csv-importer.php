@@ -201,8 +201,28 @@ class ITWC_CSV_Importer {
         $success = 0;
         $errors  = 0;
 
+        $this->debug_log[] = '=== IMPORT ROWS ===';
+
         foreach ( $rows as $row ) {
+            $this->debug_log[] = sprintf( '--- Procesando fila: ID=%d ---', $row['id'] );
+
+            // Debug: verificar que el post existe en la BD
+            global $wpdb;
+            $post_check = $wpdb->get_row( $wpdb->prepare(
+                "SELECT ID, post_type, post_status, post_title FROM {$wpdb->posts} WHERE ID = %d",
+                $row['id']
+            ) );
+            if ( $post_check ) {
+                $this->debug_log[] = sprintf(
+                    '  [DB POST] ID=%s type="%s" status="%s" title="%s"',
+                    $post_check->ID, $post_check->post_type, $post_check->post_status, $post_check->post_title
+                );
+            } else {
+                $this->debug_log[] = sprintf( '  [DB POST] ID=%d NO EXISTE en wp_posts', $row['id'] );
+            }
+
             $product = wc_get_product( $row['id'] );
+            $this->debug_log[] = '  [wc_get_product] ' . ( $product ? 'OK tipo=' . $product->get_type() . ' name="' . $product->get_name() . '"' : 'FALSE (null/no encontrado)' );
 
             if ( ! $product ) {
                 $results[] = array(
