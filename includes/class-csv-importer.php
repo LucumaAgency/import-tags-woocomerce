@@ -300,11 +300,11 @@ class ITWC_CSV_Importer {
     }
 
     /**
-     * Busca un producto padre por nombre exacto y retorna su ID.
-     * Usa cache para evitar queries repetidos.
+     * Busca un producto por nombre y retorna el ID del producto padre.
+     * Busca en productos padres y variaciones. Usa cache.
      *
      * @param string $name Nombre del producto.
-     * @return int|false ID del producto o false si no se encuentra.
+     * @return int|false ID del producto padre o false.
      */
     private function find_product_id_by_name( $name ) {
         $name = sanitize_text_field( $name );
@@ -316,7 +316,7 @@ class ITWC_CSV_Importer {
 
         global $wpdb;
 
-        // Buscar entre productos padres (no variaciones)
+        // 1. Buscar match exacto en productos padres
         $product_id = $wpdb->get_var( $wpdb->prepare(
             "SELECT ID FROM {$wpdb->posts}
              WHERE post_title = %s
@@ -327,27 +327,67 @@ class ITWC_CSV_Importer {
         ) );
 
         if ( $product_id ) {
-            $this->product_name_cache[ $cache_key ] = intval( $product_id );
-            return intval( $product_id );
+            return $this->cache_and_return( $cache_key, intval( $product_id ) );
         }
 
-        // Intentar búsqueda flexible (LIKE) si no hay match exacto
+        // 2. Buscar match exacto en variaciones → resolver al padre
+        $variation_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title = %s
+             AND post_type = 'product_variation'
+             AND post_status IN ('publish', 'draft', 'private')
+             LIMIT 1",
+            $name
+        ) );
+
+        if ( $variation_id ) {
+            $parent_id = wp_get_post_parent_id( $variation_id );
+            if ( $parent_id ) {
+                return $this->cache_and_return( $cache_key, intval( $parent_id ) );
+            }
+        }
+
+        // 3. Búsqueda LIKE flexible en productos padres
         $product_id = $wpdb->get_var( $wpdb->prepare(
             "SELECT ID FROM {$wpdb->posts}
              WHERE post_title LIKE %s
              AND post_type = 'product'
              AND post_status IN ('publish', 'draft', 'private')
              LIMIT 1",
-            $name
+            '%' . $wpdb->esc_like( $name ) . '%'
         ) );
 
         if ( $product_id ) {
-            $this->product_name_cache[ $cache_key ] = intval( $product_id );
-            return intval( $product_id );
+            return $this->cache_and_return( $cache_key, intval( $product_id ) );
+        }
+
+        // 4. Búsqueda LIKE flexible en variaciones → resolver al padre
+        $variation_id = $wpdb->get_var( $wpdb->prepare(
+            "SELECT ID FROM {$wpdb->posts}
+             WHERE post_title LIKE %s
+             AND post_type = 'product_variation'
+             AND post_status IN ('publish', 'draft', 'private')
+             LIMIT 1",
+            '%' . $wpdb->esc_like( $name ) . '%'
+        ) );
+
+        if ( $variation_id ) {
+            $parent_id = wp_get_post_parent_id( $variation_id );
+            if ( $parent_id ) {
+                return $this->cache_and_return( $cache_key, intval( $parent_id ) );
+            }
         }
 
         $this->product_name_cache[ $cache_key ] = false;
         return false;
+    }
+
+    /**
+     * Guarda en cache y retorna el ID.
+     */
+    private function cache_and_return( $cache_key, $id ) {
+        $this->product_name_cache[ $cache_key ] = $id;
+        return $id;
     }
 
     /**
