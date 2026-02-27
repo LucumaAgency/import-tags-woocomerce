@@ -1,0 +1,76 @@
+.itwc-wrap {
+    max-width: 900px;
+}
+
+.itwc-card {
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-top: 20px;
+}
+
+.itwc-card h2 {
+    margin-top: 0;
+    padding-top: 0;
+}
+
+.itwc-summary {
+    display: flex;
+    gap: 10px;
+    margin: 15px 0;
+}
+
+.itwc-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.itwc-badge-success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.itwc-badge-error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.itwc-badge-total {
+    background: #e2e3e5;
+    color: #383d41;
+}
+
+.itwc-results-table {
+    margin-top: 15px;
+}
+
+.itwc-status {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.itwc-status-success {
+    background: #d4edda;
+    color: #155724;
+}
+
+.itwc-status-error {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.itwc-status-skipped {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.itwc-row-error td {
+    background-color: #fff5f5;
+}
