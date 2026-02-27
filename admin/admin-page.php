@@ -19,7 +19,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
 
 <div class="wrap itwc-wrap">
     <h1>Importar Etiquetas y Recomendaciones</h1>
-    <p>Sube un archivo CSV con las columnas <strong>ID</strong>, <strong>Title</strong>, y opcionalmente <strong>Product Tags</strong> y/o <strong>Recommended Products</strong>.</p>
+    <p>Sube un archivo CSV con la columna <strong>Title</strong> (requerida) para emparejar productos por nombre. Columnas opcionales: <strong>ID</strong>, <strong>Product Tags</strong>, <strong>Recommended Products</strong>.</p>
 
     <div class="itwc-card">
         <h2>Subir archivo CSV</h2>
@@ -30,7 +30,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
                     <th scope="row"><label for="itwc_csv_file">Archivo CSV</label></th>
                     <td>
                         <input type="file" name="itwc_csv_file" id="itwc_csv_file" accept=".csv" required />
-                        <p class="description">Columnas requeridas: ID, Title. Opcionales: Product Tags, Recommended Products.</p>
+                        <p class="description">Columna requerida: <strong>Title</strong>. Opcionales: ID, Product Tags, Recommended Products. El emparejamiento se hace por nombre del producto.</p>
                     </td>
                 </tr>
                 <tr>
@@ -124,10 +124,10 @@ console.groupEnd();
 <script>
 document.getElementById('itwc-download-example').addEventListener('click', function(e) {
     e.preventDefault();
-    var csv = 'ID,Title,Product Tags,Recommended Products\n';
-    csv += '101,Camisa Azul,"etiqueta1, etiqueta2","Pantalon Negro, Zapatos Rojos"\n';
-    csv += '102,Pantalon Negro,"oferta, nuevo","Camisa Azul"\n';
-    csv += '103,Zapatos Rojos,"destacado","Camisa Azul, Pantalon Negro"\n';
+    var csv = 'Title,Product Tags,Recommended Products\n';
+    csv += 'Camisa Azul,"etiqueta1, etiqueta2","Pantalon Negro, Zapatos Rojos"\n';
+    csv += 'Pantalon Negro,"oferta, nuevo","Camisa Azul"\n';
+    csv += 'Zapatos Rojos,"destacado","Camisa Azul, Pantalon Negro"\n';
 
     var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     var link = document.createElement('a');

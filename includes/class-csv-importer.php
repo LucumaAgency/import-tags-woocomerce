@@ -9,7 +9,7 @@ class ITWC_CSV_Importer {
     /**
      * Columnas requeridas en el CSV.
      */
-    private const REQUIRED_COLUMNS = array( 'ID', 'Title' );
+    private const REQUIRED_COLUMNS = array( 'Title' );
 
     /**
      * Separador de etiquetas/recomendaciones.
@@ -121,18 +121,20 @@ class ITWC_CSV_Importer {
             }
         }
 
-        $id_index    = array_search( 'ID', $header, true );
         $title_index = array_search( 'Title', $header, true );
+        $id_index    = array_search( 'ID', $header, true ); // Opcional
 
         // Columnas opcionales
         $tags_index  = array_search( 'Product Tags', $header, true );
         $rec_index   = array_search( 'Recommended Products', $header, true );
 
+        $has_id              = false !== $id_index;
         $has_tags            = false !== $tags_index;
         $has_recommendations = false !== $rec_index;
 
         $this->debug_log[] = '=== PARSE CSV ===';
         $this->debug_log[] = 'Headers encontrados: ' . wp_json_encode( $header );
+        $this->debug_log[] = 'Columna ID: ' . ( $has_id ? 'SI (index ' . $id_index . ')' : 'NO - se usará Title para emparejar' );
         $this->debug_log[] = 'Columna Product Tags: ' . ( $has_tags ? 'SI (index ' . $tags_index . ')' : 'NO' );
         $this->debug_log[] = 'Columna Recommended Products: ' . ( $has_recommendations ? 'SI (index ' . $rec_index . ')' : 'NO' );
         $this->debug_log[] = 'Separador configurado: "' . $this->separator . '"';
@@ -149,14 +151,14 @@ class ITWC_CSV_Importer {
         while ( ( $data = fgetcsv( $handle ) ) !== false ) {
             $line++;
 
-            if ( count( $data ) <= max( $id_index, $title_index ) ) {
+            if ( count( $data ) <= $title_index ) {
                 continue;
             }
 
-            $id   = trim( $data[ $id_index ] );
             $title = trim( $data[ $title_index ] );
+            $id    = $has_id && isset( $data[ $id_index ] ) ? trim( $data[ $id_index ] ) : '';
 
-            if ( empty( $id ) ) {
+            if ( empty( $title ) ) {
                 continue;
             }
 
@@ -165,14 +167,14 @@ class ITWC_CSV_Importer {
 
             $this->debug_log[] = sprintf(
                 'Fila %d: ID=%s | Title="%s" | Tags="%s" | Rec="%s" | Raw data=%s',
-                $line, $id, $title, $tags_val, $rec_val, wp_json_encode( $data )
+                $line, $id ?: '(sin ID)', $title, $tags_val, $rec_val, wp_json_encode( $data )
             );
 
             $row_data = array(
-                'line'  => $line,
-                'id'    => intval( $id ),
-                'title' => sanitize_text_field( $title ),
-                'tags'  => $tags_val,
+                'line'            => $line,
+                'id'              => intval( $id ),
+                'title'           => sanitize_text_field( $title ),
+                'tags'            => $tags_val,
                 'recommendations' => $rec_val,
             );
 
@@ -204,43 +206,45 @@ class ITWC_CSV_Importer {
         $this->debug_log[] = '=== IMPORT ROWS ===';
 
         foreach ( $rows as $row ) {
-            $this->debug_log[] = sprintf( '--- Procesando fila: ID=%d ---', $row['id'] );
+            $this->debug_log[] = sprintf( '--- Procesando fila: Title="%s" (ID csv=%d) ---', $row['title'], $row['id'] );
 
-            // Debug: verificar que el post existe en la BD
-            global $wpdb;
-            $post_check = $wpdb->get_row( $wpdb->prepare(
-                "SELECT ID, post_type, post_status, post_title FROM {$wpdb->posts} WHERE ID = %d",
-                $row['id']
-            ) );
-            if ( $post_check ) {
-                $this->debug_log[] = sprintf(
-                    '  [DB POST] ID=%s type="%s" status="%s" title="%s"',
-                    $post_check->ID, $post_check->post_type, $post_check->post_status, $post_check->post_title
-                );
-            } else {
-                $this->debug_log[] = sprintf( '  [DB POST] ID=%d NO EXISTE en wp_posts', $row['id'] );
+            // Buscar producto por Title (prioridad) o por ID como fallback
+            $product_id = $this->find_product_id_by_name( $row['title'] );
+
+            if ( ! $product_id && $row['id'] > 0 ) {
+                $this->debug_log[] = '  [FALLBACK] Title no encontrado, intentando con ID=' . $row['id'];
+                $fallback_product = wc_get_product( $row['id'] );
+                if ( $fallback_product ) {
+                    $product_id = $row['id'];
+                    if ( $fallback_product->is_type( 'variation' ) ) {
+                        $product_id = $fallback_product->get_parent_id();
+                    }
+                    $this->debug_log[] = '  [FALLBACK] OK => product_id=' . $product_id;
+                }
             }
 
-            $product = wc_get_product( $row['id'] );
-            $this->debug_log[] = '  [wc_get_product] ' . ( $product ? 'OK tipo=' . $product->get_type() . ' name="' . $product->get_name() . '"' : 'FALSE (null/no encontrado)' );
-
-            if ( ! $product ) {
+            if ( ! $product_id ) {
+                $this->debug_log[] = '  [RESULTADO] Producto NO encontrado por Title ni por ID';
                 $results[] = array(
-                    'id'              => $row['id'],
+                    'id'              => $product_id ?: $row['id'],
                     'title'           => $row['title'],
                     'tags'            => $row['tags'],
                     'recommendations' => $row['recommendations'],
                     'status'          => 'error',
-                    'message'         => 'Producto no encontrado.',
+                    'message'         => 'Producto no encontrado: "' . $row['title'] . '"',
                 );
                 $errors++;
                 continue;
             }
 
+            $product = wc_get_product( $product_id );
+            $this->debug_log[] = sprintf( '  [MATCH] product_id=%d name="%s" type="%s"', $product_id, $product->get_name(), $product->get_type() );
+
             // Resolver al producto padre si es una variación
-            $parent_id = $row['id'];
+            $parent_id = $product_id;
             if ( $product->is_type( 'variation' ) ) {
                 $parent_id = $product->get_parent_id();
+                $this->debug_log[] = '  [PARENT] variación resuelta a padre ID=' . $parent_id;
             }
 
             $messages    = array();
@@ -272,7 +276,7 @@ class ITWC_CSV_Importer {
                     $rec_ids    = array();
                     $not_found  = array();
 
-                    $this->debug_log[] = sprintf( '--- Producto ID %d: buscando recomendaciones ---', $row['id'] );
+                    $this->debug_log[] = sprintf( '--- Producto ID %d ("%s"): buscando recomendaciones ---', $parent_id, $row['title'] );
                     $this->debug_log[] = 'Nombres a buscar: ' . wp_json_encode( $rec_names );
 
                     foreach ( $rec_names as $name ) {
@@ -300,7 +304,7 @@ class ITWC_CSV_Importer {
 
             if ( empty( $messages ) ) {
                 $results[] = array(
-                    'id'              => $row['id'],
+                    'id'              => $parent_id,
                     'title'           => $product->get_name(),
                     'tags'            => $row['tags'],
                     'recommendations' => $row['recommendations'],
@@ -318,7 +322,7 @@ class ITWC_CSV_Importer {
             }
 
             $results[] = array(
-                'id'              => $row['id'],
+                'id'              => $parent_id,
                 'title'           => $product->get_name(),
                 'tags'            => $row['tags'],
                 'recommendations' => $row['recommendations'],
