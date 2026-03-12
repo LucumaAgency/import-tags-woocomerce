@@ -19,7 +19,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
 
 <div class="wrap itwc-wrap">
     <h1>Importar Etiquetas y Recomendaciones</h1>
-    <p>Sube un archivo CSV con la columna <strong>Title</strong> (requerida) para emparejar productos por nombre. Columnas opcionales: <strong>ID</strong>, <strong>Product Tags</strong>, <strong>Recommended Products</strong>.</p>
+    <p>Sube un archivo CSV con la columna <strong>Title</strong> (requerida) para emparejar productos por nombre. Columnas opcionales: <strong>ID</strong>, <strong>Product Tags</strong>, <strong>Recommended Products</strong>. Cualquier otra columna se tratará como un campo ACF (ej: <code>editor_de_tabla</code>).</p>
 
     <div class="itwc-card">
         <h2>Subir archivo CSV</h2>
@@ -30,7 +30,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
                     <th scope="row"><label for="itwc_csv_file">Archivo CSV</label></th>
                     <td>
                         <input type="file" name="itwc_csv_file" id="itwc_csv_file" accept=".csv" required />
-                        <p class="description">Columna requerida: <strong>Title</strong>. Opcionales: ID, Product Tags, Recommended Products. El emparejamiento se hace por nombre del producto.</p>
+                        <p class="description">Columna requerida: <strong>Title</strong>. Opcionales: ID, Product Tags, Recommended Products. Columnas adicionales = campos ACF. El emparejamiento se hace por nombre del producto.</p>
                     </td>
                 </tr>
                 <tr>
@@ -77,6 +77,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
                             <th>Producto</th>
                             <th>Etiquetas</th>
                             <th>Recomendaciones</th>
+                            <th>Campos ACF</th>
                             <th>Estado</th>
                             <th>Detalle</th>
                         </tr>
@@ -88,6 +89,7 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
                                 <td><?php echo esc_html( $row['title'] ); ?></td>
                                 <td><?php echo esc_html( $row['tags'] ); ?></td>
                                 <td><?php echo esc_html( isset( $row['recommendations'] ) ? $row['recommendations'] : '' ); ?></td>
+                                <td><?php echo esc_html( ! empty( $row['acf_fields'] ) ? implode( ', ', $row['acf_fields'] ) : '' ); ?></td>
                                 <td>
                                     <?php
                                     $status_labels = array(

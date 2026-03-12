@@ -22,6 +22,11 @@ class ITWC_CSV_Importer {
     private $acf_field_name;
 
     /**
+     * Columnas extra detectadas como campos ACF.
+     */
+    private $acf_columns = array();
+
+    /**
      * Cache de búsqueda de productos por nombre => ID.
      */
     private $product_name_cache = array();
@@ -58,6 +63,10 @@ class ITWC_CSV_Importer {
             return $this->error( 'No se ha seleccionado ningún archivo.' );
         }
 
+        if ( ! function_exists( 'update_field' ) ) {
+            return $this->error( 'Advanced Custom Fields (ACF) no está activo. Es necesario para importar campos personalizados y recomendaciones.' );
+        }
+
         $file = $_FILES['itwc_csv_file'];
 
         $extension = strtolower( pathinfo( $file['name'], PATHINFO_EXTENSION ) );
@@ -71,9 +80,10 @@ class ITWC_CSV_Importer {
             return $this->error( $parsed );
         }
 
-        $rows        = $parsed['rows'];
-        $has_tags    = $parsed['has_tags'];
+        $rows                = $parsed['rows'];
+        $has_tags            = $parsed['has_tags'];
         $has_recommendations = $parsed['has_recommendations'];
+        $has_acf_fields      = $parsed['has_acf_fields'];
 
         if ( empty( $rows ) ) {
             return $this->error( 'El archivo CSV está vacío o no contiene filas de datos.' );
@@ -83,7 +93,7 @@ class ITWC_CSV_Importer {
             return $this->error( 'El CSV contiene la columna "Recommended Products" pero no se indicó el nombre del campo ACF.' );
         }
 
-        return $this->import_rows( $rows, $has_tags, $has_recommendations );
+        return $this->import_rows( $rows, $has_tags, $has_recommendations, $has_acf_fields );
     }
 
     /**
@@ -132,17 +142,27 @@ class ITWC_CSV_Importer {
         $has_tags            = false !== $tags_index;
         $has_recommendations = false !== $rec_index;
 
+        // Detectar columnas extra como campos ACF
+        $known_columns = array( 'ID', 'Title', 'Product Tags', 'Recommended Products' );
+        $this->acf_columns = array();
+        foreach ( $header as $index => $col_name ) {
+            if ( ! in_array( $col_name, $known_columns, true ) ) {
+                $this->acf_columns[ $index ] = $col_name;
+            }
+        }
+
         $this->debug_log[] = '=== PARSE CSV ===';
         $this->debug_log[] = 'Headers encontrados: ' . wp_json_encode( $header );
         $this->debug_log[] = 'Columna ID: ' . ( $has_id ? 'SI (index ' . $id_index . ')' : 'NO - se usará Title para emparejar' );
         $this->debug_log[] = 'Columna Product Tags: ' . ( $has_tags ? 'SI (index ' . $tags_index . ')' : 'NO' );
         $this->debug_log[] = 'Columna Recommended Products: ' . ( $has_recommendations ? 'SI (index ' . $rec_index . ')' : 'NO' );
+        $this->debug_log[] = 'Campos ACF detectados: ' . ( ! empty( $this->acf_columns ) ? wp_json_encode( $this->acf_columns ) : 'ninguno' );
         $this->debug_log[] = 'Separador configurado: "' . $this->separator . '"';
-        $this->debug_log[] = 'Campo ACF: "' . $this->acf_field_name . '"';
+        $this->debug_log[] = 'Campo ACF Recomendaciones: "' . $this->acf_field_name . '"';
 
-        if ( ! $has_tags && ! $has_recommendations ) {
+        if ( ! $has_tags && ! $has_recommendations && empty( $this->acf_columns ) ) {
             fclose( $handle );
-            return 'El CSV debe contener al menos una de estas columnas: "Product Tags", "Recommended Products".';
+            return 'El CSV debe contener al menos una de estas columnas: "Product Tags", "Recommended Products", o columnas extra para campos ACF.';
         }
 
         $rows = array();
@@ -165,9 +185,17 @@ class ITWC_CSV_Importer {
             $tags_val = $has_tags && isset( $data[ $tags_index ] ) ? trim( $data[ $tags_index ] ) : '';
             $rec_val  = $has_recommendations && isset( $data[ $rec_index ] ) ? trim( $data[ $rec_index ] ) : '';
 
+            // Extraer valores de campos ACF extra
+            $acf_values = array();
+            foreach ( $this->acf_columns as $col_idx => $field_name ) {
+                if ( isset( $data[ $col_idx ] ) && '' !== trim( $data[ $col_idx ] ) ) {
+                    $acf_values[ $field_name ] = trim( $data[ $col_idx ] );
+                }
+            }
+
             $this->debug_log[] = sprintf(
-                'Fila %d: ID=%s | Title="%s" | Tags="%s" | Rec="%s" | Raw data=%s',
-                $line, $id ?: '(sin ID)', $title, $tags_val, $rec_val, wp_json_encode( $data )
+                'Fila %d: ID=%s | Title="%s" | Tags="%s" | Rec="%s" | ACF campos=%d',
+                $line, $id ?: '(sin ID)', $title, $tags_val, $rec_val, count( $acf_values )
             );
 
             $row_data = array(
@@ -176,6 +204,7 @@ class ITWC_CSV_Importer {
                 'title'           => sanitize_text_field( $title ),
                 'tags'            => $tags_val,
                 'recommendations' => $rec_val,
+                'acf_fields'      => $acf_values,
             );
 
             $rows[] = $row_data;
@@ -187,18 +216,20 @@ class ITWC_CSV_Importer {
             'rows'                => $rows,
             'has_tags'            => $has_tags,
             'has_recommendations' => $has_recommendations,
+            'has_acf_fields'      => ! empty( $this->acf_columns ),
         );
     }
 
     /**
-     * Importa etiquetas y/o recomendaciones a los productos.
+     * Importa etiquetas, recomendaciones y/o campos ACF a los productos.
      *
      * @param array $rows                Filas parseadas del CSV.
      * @param bool  $has_tags            Si el CSV tiene columna Product Tags.
      * @param bool  $has_recommendations Si el CSV tiene columna Recommended Products.
+     * @param bool  $has_acf_fields      Si el CSV tiene columnas extra para campos ACF.
      * @return array Resultado de la importación.
      */
-    private function import_rows( $rows, $has_tags, $has_recommendations ) {
+    private function import_rows( $rows, $has_tags, $has_recommendations, $has_acf_fields = false ) {
         $results = array();
         $success = 0;
         $errors  = 0;
@@ -230,6 +261,7 @@ class ITWC_CSV_Importer {
                     'title'           => $row['title'],
                     'tags'            => $row['tags'],
                     'recommendations' => $row['recommendations'],
+                    'acf_fields'      => array_keys( $row['acf_fields'] ),
                     'status'          => 'error',
                     'message'         => 'Producto no encontrado: "' . $row['title'] . '"',
                 );
@@ -302,12 +334,38 @@ class ITWC_CSV_Importer {
                 }
             }
 
+            // --- Importar campos ACF extra ---
+            if ( $has_acf_fields && ! empty( $row['acf_fields'] ) ) {
+                $acf_updated = 0;
+                $acf_errors  = array();
+
+                foreach ( $row['acf_fields'] as $field_name => $field_value ) {
+                    $this->debug_log[] = sprintf( '  [ACF] Actualizando campo "%s" en producto %d (largo valor: %d)', $field_name, $parent_id, mb_strlen( $field_value ) );
+                    $result = update_field( $field_name, $field_value, $parent_id );
+                    if ( $result ) {
+                        $acf_updated++;
+                    } else {
+                        $acf_errors[] = $field_name;
+                        $this->debug_log[] = sprintf( '  [ACF] Error al actualizar campo "%s"', $field_name );
+                    }
+                }
+
+                if ( $acf_updated > 0 ) {
+                    $messages[] = $acf_updated . ' campo(s) ACF';
+                }
+                if ( ! empty( $acf_errors ) ) {
+                    $messages[]  = 'ACF error: ' . implode( ', ', $acf_errors );
+                    $row_success = false;
+                }
+            }
+
             if ( empty( $messages ) ) {
                 $results[] = array(
                     'id'              => $parent_id,
                     'title'           => $product->get_name(),
                     'tags'            => $row['tags'],
                     'recommendations' => $row['recommendations'],
+                    'acf_fields'      => array_keys( $row['acf_fields'] ),
                     'status'          => 'skipped',
                     'message'         => 'Sin datos para importar.',
                 );
@@ -326,6 +384,7 @@ class ITWC_CSV_Importer {
                 'title'           => $product->get_name(),
                 'tags'            => $row['tags'],
                 'recommendations' => $row['recommendations'],
+                'acf_fields'      => array_keys( $row['acf_fields'] ),
                 'status'          => $status,
                 'message'         => implode( ' | ', $messages ),
             );
