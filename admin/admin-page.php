@@ -5,6 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 $import_result = null;
+$size_result   = null;
 
 if ( isset( $_POST['itwc_import_submit'] ) ) {
     $separator      = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
@@ -13,8 +14,15 @@ if ( isset( $_POST['itwc_import_submit'] ) ) {
     $import_result  = $importer->process_upload();
 }
 
+if ( isset( $_POST['itwc_assign_size_submit'] ) ) {
+    $size_value = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field( $_POST['itwc_standard_size'] ) : 'Talla Única';
+    $assigner   = new ITWC_Standard_Size_Assigner( $size_value );
+    $size_result = $assigner->process();
+}
+
 $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
 $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_POST['itwc_acf_field'] ) : '';
+$current_size      = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field( $_POST['itwc_standard_size'] ) : 'Talla Única';
 ?>
 
 <div class="wrap itwc-wrap">
@@ -54,6 +62,76 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
             </p>
         </form>
     </div>
+
+    <div class="itwc-card">
+        <h2>Asignar talla estándar</h2>
+        <p>Asigna automáticamente una talla estándar (atributo <code>pa_tallas</code>) a todos los productos que <strong>no tengan ninguna talla</strong> configurada.</p>
+        <form method="post">
+            <?php wp_nonce_field( 'itwc_assign_standard_size', 'itwc_nonce_size' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="itwc_standard_size">Valor de la talla</label></th>
+                    <td>
+                        <input type="text" name="itwc_standard_size" id="itwc_standard_size" value="<?php echo esc_attr( $current_size ); ?>" class="regular-text" />
+                        <p class="description">Valor que se asignará como talla a los productos sin talla. Ejemplo: <code>Talla Única</code>, <code>Estándar</code>, <code>Free Size</code></p>
+                    </td>
+                </tr>
+            </table>
+            <p class="submit">
+                <input type="submit" name="itwc_assign_size_submit" class="button button-primary" value="Asignar talla estándar" onclick="return confirm('¿Estás seguro? Esto asignará la talla a todos los productos que no tengan tallas configuradas.');" />
+            </p>
+        </form>
+    </div>
+
+    <?php if ( $size_result ) : ?>
+        <div class="itwc-card itwc-results">
+            <div class="notice <?php echo $size_result['success'] ? 'notice-success' : 'notice-error'; ?> inline">
+                <p><strong><?php echo esc_html( $size_result['message'] ); ?></strong></p>
+            </div>
+
+            <?php if ( ! empty( $size_result['results'] ) ) : ?>
+                <?php if ( $size_result['success'] && ! empty( $size_result['summary'] ) ) : ?>
+                    <div class="itwc-summary">
+                        <span class="itwc-badge itwc-badge-success"><?php echo intval( $size_result['summary']['success'] ); ?> actualizado(s)</span>
+                        <span class="itwc-badge itwc-badge-error"><?php echo intval( $size_result['summary']['errors'] ); ?> error(es)</span>
+                        <span class="itwc-badge itwc-badge-total"><?php echo intval( $size_result['summary']['skipped'] ); ?> ya tenían talla</span>
+                    </div>
+                <?php endif; ?>
+
+                <table class="widefat striped itwc-results-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Producto</th>
+                            <th>Estado</th>
+                            <th>Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $size_result['results'] as $row ) : ?>
+                            <tr class="itwc-row-<?php echo esc_attr( $row['status'] ); ?>">
+                                <td><?php echo intval( $row['id'] ); ?></td>
+                                <td><?php echo esc_html( $row['title'] ); ?></td>
+                                <td>
+                                    <?php
+                                    $status_labels = array(
+                                        'success' => 'Actualizado',
+                                        'error'   => 'Error',
+                                    );
+                                    $label = isset( $status_labels[ $row['status'] ] ) ? $status_labels[ $row['status'] ] : $row['status'];
+                                    ?>
+                                    <span class="itwc-status itwc-status-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <?php echo esc_html( $label ); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo esc_html( $row['message'] ); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
 
     <?php if ( $import_result ) : ?>
         <div class="itwc-card itwc-results">
@@ -112,6 +190,16 @@ $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_
         </div>
     <?php endif; ?>
 </div>
+
+<?php if ( $size_result && ! empty( $size_result['debug_log'] ) ) : ?>
+<script>
+console.group('%c[ITWC DEBUG] Asignar Talla Estándar', 'color: #28a745; font-weight: bold; font-size: 14px;');
+<?php foreach ( $size_result['debug_log'] as $log_line ) : ?>
+console.log(<?php echo wp_json_encode( $log_line ); ?>);
+<?php endforeach; ?>
+console.groupEnd();
+</script>
+<?php endif; ?>
 
 <?php if ( $import_result && ! empty( $import_result['debug_log'] ) ) : ?>
 <script>
