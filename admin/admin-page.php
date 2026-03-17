@@ -4,8 +4,9 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-$import_result = null;
-$size_result   = null;
+$import_result  = null;
+$size_result    = null;
+$convert_result = null;
 
 if ( isset( $_POST['itwc_import_submit'] ) ) {
     $separator      = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
@@ -20,9 +21,16 @@ if ( isset( $_POST['itwc_assign_size_submit'] ) ) {
     $size_result = $assigner->process();
 }
 
+if ( isset( $_POST['itwc_convert_submit'] ) ) {
+    $convert_stock = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itwc_convert_stock'] ) : 10;
+    $converter     = new ITWC_Simple_To_Variable_Converter( $convert_stock );
+    $convert_result = $converter->process();
+}
+
 $current_separator = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
 $current_acf_field = isset( $_POST['itwc_acf_field'] ) ? sanitize_text_field( $_POST['itwc_acf_field'] ) : '';
 $current_size      = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field( $_POST['itwc_standard_size'] ) : 'Talla Única';
+$current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itwc_convert_stock'] ) : 10;
 ?>
 
 <div class="wrap itwc-wrap">
@@ -133,6 +141,75 @@ $current_size      = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field
         </div>
     <?php endif; ?>
 
+    <div class="itwc-card">
+        <h2>Convertir simples a variables</h2>
+        <p>Convierte todos los productos <strong>simples</strong> que tengan el atributo <code>pa_tallas</code> a productos <strong>variables</strong>. Se creará una variación por cada talla asignada, heredando el precio del producto original.</p>
+        <form method="post">
+            <?php wp_nonce_field( 'itwc_convert_to_variable', 'itwc_nonce_convert' ); ?>
+            <table class="form-table">
+                <tr>
+                    <th scope="row"><label for="itwc_convert_stock">Stock por variación</label></th>
+                    <td>
+                        <input type="number" name="itwc_convert_stock" id="itwc_convert_stock" value="<?php echo esc_attr( $current_stock ); ?>" class="small-text" min="0" />
+                        <p class="description">Cantidad de stock que se asignará a cada variación creada.</p>
+                    </td>
+                </tr>
+            </table>
+            <p class="submit">
+                <input type="submit" name="itwc_convert_submit" class="button button-primary" value="Convertir a variables" onclick="return confirm('¿Estás seguro? Esto convertirá todos los productos simples con tallas a productos variables y creará las variaciones correspondientes.');" />
+            </p>
+        </form>
+    </div>
+
+    <?php if ( $convert_result ) : ?>
+        <div class="itwc-card itwc-results">
+            <div class="notice <?php echo $convert_result['success'] ? 'notice-success' : 'notice-error'; ?> inline">
+                <p><strong><?php echo esc_html( $convert_result['message'] ); ?></strong></p>
+            </div>
+
+            <?php if ( ! empty( $convert_result['results'] ) ) : ?>
+                <?php if ( $convert_result['success'] && ! empty( $convert_result['summary'] ) ) : ?>
+                    <div class="itwc-summary">
+                        <span class="itwc-badge itwc-badge-success"><?php echo intval( $convert_result['summary']['success'] ); ?> convertido(s)</span>
+                        <span class="itwc-badge itwc-badge-error"><?php echo intval( $convert_result['summary']['errors'] ); ?> error(es)</span>
+                        <span class="itwc-badge itwc-badge-total"><?php echo intval( $convert_result['summary']['skipped'] ); ?> omitido(s)</span>
+                    </div>
+                <?php endif; ?>
+
+                <table class="widefat striped itwc-results-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Producto</th>
+                            <th>Precio</th>
+                            <th>Tallas</th>
+                            <th>Variaciones</th>
+                            <th>Estado</th>
+                            <th>Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $convert_result['results'] as $row ) : ?>
+                            <tr class="itwc-row-<?php echo esc_attr( $row['status'] ); ?>">
+                                <td><?php echo intval( $row['id'] ); ?></td>
+                                <td><?php echo esc_html( $row['title'] ); ?></td>
+                                <td><?php echo esc_html( $row['price'] ?: '—' ); ?></td>
+                                <td><?php echo esc_html( $row['tallas'] ); ?></td>
+                                <td><?php echo intval( $row['created'] ); ?></td>
+                                <td>
+                                    <span class="itwc-status itwc-status-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <?php echo 'success' === $row['status'] ? 'Convertido' : 'Error'; ?>
+                                    </span>
+                                </td>
+                                <td><?php echo esc_html( $row['message'] ); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
     <?php if ( $import_result ) : ?>
         <div class="itwc-card itwc-results">
             <div class="notice <?php echo $import_result['success'] ? 'notice-success' : 'notice-error'; ?> inline">
@@ -190,6 +267,16 @@ $current_size      = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field
         </div>
     <?php endif; ?>
 </div>
+
+<?php if ( $convert_result && ! empty( $convert_result['debug_log'] ) ) : ?>
+<script>
+console.group('%c[ITWC DEBUG] Convertir Simples a Variables', 'color: #e83e8c; font-weight: bold; font-size: 14px;');
+<?php foreach ( $convert_result['debug_log'] as $log_line ) : ?>
+console.log(<?php echo wp_json_encode( $log_line ); ?>);
+<?php endforeach; ?>
+console.groupEnd();
+</script>
+<?php endif; ?>
 
 <?php if ( $size_result && ! empty( $size_result['debug_log'] ) ) : ?>
 <script>
