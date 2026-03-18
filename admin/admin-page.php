@@ -218,7 +218,7 @@ $current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itw
 
     <div class="itwc-card">
         <h2>Sincronizar orden de tallas</h2>
-        <p>Recorre todos los productos variables y reordena las tallas y variaciones según el orden configurado en <strong>Productos &gt; Atributos &gt; Tallas</strong>. No modifica precios ni stock.</p>
+        <p>Recorre todos los productos variables y <strong>elimina y recrea las variaciones</strong> en el orden configurado en <strong>Productos &gt; Atributos &gt; Tallas</strong>, para que los IDs queden secuenciales en el orden correcto. Preserva precio, stock, SKU, imagen y metadatos de cada variación.</p>
         <form method="post">
             <?php wp_nonce_field( 'itwc_sync_variation_order', 'itwc_nonce_sync_order' ); ?>
             <p class="submit">
@@ -247,6 +247,7 @@ $current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itw
                             <th>ID</th>
                             <th>Producto</th>
                             <th>Tallas</th>
+                            <th>Nuevos IDs</th>
                             <th>Estado</th>
                             <th>Detalle</th>
                         </tr>
@@ -257,11 +258,12 @@ $current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itw
                                 <td><?php echo intval( $row['id'] ); ?></td>
                                 <td><?php echo esc_html( $row['title'] ); ?></td>
                                 <td><?php echo esc_html( $row['tallas'] ); ?></td>
+                                <td><small><?php echo esc_html( isset( $row['detail'] ) ? $row['detail'] : '' ); ?></small></td>
                                 <td>
                                     <?php
                                     $sync_labels = array(
-                                        'success' => 'Reordenado',
-                                        'synced'  => 'Sincronizado',
+                                        'success' => 'Recreado',
+                                        'synced'  => 'Ya en orden',
                                     );
                                     $label = isset( $sync_labels[ $row['status'] ] ) ? $sync_labels[ $row['status'] ] : $row['status'];
                                     ?>
