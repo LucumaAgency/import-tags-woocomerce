@@ -4,9 +4,10 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 
-$import_result  = null;
-$size_result    = null;
-$convert_result = null;
+$import_result    = null;
+$size_result      = null;
+$convert_result   = null;
+$sync_order_result = null;
 
 if ( isset( $_POST['itwc_import_submit'] ) ) {
     $separator      = isset( $_POST['itwc_separator'] ) ? sanitize_text_field( $_POST['itwc_separator'] ) : ',';
@@ -19,6 +20,11 @@ if ( isset( $_POST['itwc_assign_size_submit'] ) ) {
     $size_value = isset( $_POST['itwc_standard_size'] ) ? sanitize_text_field( $_POST['itwc_standard_size'] ) : 'Talla Única';
     $assigner   = new ITWC_Standard_Size_Assigner( $size_value );
     $size_result = $assigner->process();
+}
+
+if ( isset( $_POST['itwc_sync_order_submit'] ) ) {
+    $syncer = new ITWC_Variation_Order_Sync();
+    $sync_order_result = $syncer->process();
 }
 
 if ( isset( $_POST['itwc_convert_submit'] ) ) {
@@ -210,6 +216,68 @@ $current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itw
         </div>
     <?php endif; ?>
 
+    <div class="itwc-card">
+        <h2>Sincronizar orden de tallas</h2>
+        <p>Recorre todos los productos variables y reordena las tallas y variaciones según el orden configurado en <strong>Productos &gt; Atributos &gt; Tallas</strong>. No modifica precios ni stock.</p>
+        <form method="post">
+            <?php wp_nonce_field( 'itwc_sync_variation_order', 'itwc_nonce_sync_order' ); ?>
+            <p class="submit">
+                <input type="submit" name="itwc_sync_order_submit" class="button button-primary" value="Sincronizar orden de tallas" onclick="return confirm('¿Estás seguro? Esto reordenará las tallas y variaciones de todos los productos variables según el orden de la taxonomía.');" />
+            </p>
+        </form>
+    </div>
+
+    <?php if ( $sync_order_result ) : ?>
+        <div class="itwc-card itwc-results">
+            <div class="notice <?php echo $sync_order_result['success'] ? 'notice-success' : 'notice-error'; ?> inline">
+                <p><strong><?php echo esc_html( $sync_order_result['message'] ); ?></strong></p>
+            </div>
+
+            <?php if ( ! empty( $sync_order_result['results'] ) ) : ?>
+                <?php if ( $sync_order_result['success'] && ! empty( $sync_order_result['summary'] ) ) : ?>
+                    <div class="itwc-summary">
+                        <span class="itwc-badge itwc-badge-success"><?php echo intval( $sync_order_result['summary']['updated'] ); ?> procesado(s)</span>
+                        <span class="itwc-badge itwc-badge-total"><?php echo intval( $sync_order_result['summary']['skipped'] ); ?> omitido(s)</span>
+                    </div>
+                <?php endif; ?>
+
+                <table class="widefat striped itwc-results-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Producto</th>
+                            <th>Tallas</th>
+                            <th>Estado</th>
+                            <th>Detalle</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ( $sync_order_result['results'] as $row ) : ?>
+                            <tr class="itwc-row-<?php echo esc_attr( $row['status'] ); ?>">
+                                <td><?php echo intval( $row['id'] ); ?></td>
+                                <td><?php echo esc_html( $row['title'] ); ?></td>
+                                <td><?php echo esc_html( $row['tallas'] ); ?></td>
+                                <td>
+                                    <?php
+                                    $sync_labels = array(
+                                        'success' => 'Reordenado',
+                                        'synced'  => 'Sincronizado',
+                                    );
+                                    $label = isset( $sync_labels[ $row['status'] ] ) ? $sync_labels[ $row['status'] ] : $row['status'];
+                                    ?>
+                                    <span class="itwc-status itwc-status-<?php echo esc_attr( $row['status'] ); ?>">
+                                        <?php echo esc_html( $label ); ?>
+                                    </span>
+                                </td>
+                                <td><?php echo esc_html( $row['message'] ); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php endif; ?>
+        </div>
+    <?php endif; ?>
+
     <?php if ( $import_result ) : ?>
         <div class="itwc-card itwc-results">
             <div class="notice <?php echo $import_result['success'] ? 'notice-success' : 'notice-error'; ?> inline">
@@ -267,6 +335,16 @@ $current_stock     = isset( $_POST['itwc_convert_stock'] ) ? intval( $_POST['itw
         </div>
     <?php endif; ?>
 </div>
+
+<?php if ( $sync_order_result && ! empty( $sync_order_result['debug_log'] ) ) : ?>
+<script>
+console.group('%c[ITWC DEBUG] Sincronizar Orden de Tallas', 'color: #fd7e14; font-weight: bold; font-size: 14px;');
+<?php foreach ( $sync_order_result['debug_log'] as $log_line ) : ?>
+console.log(<?php echo wp_json_encode( $log_line ); ?>);
+<?php endforeach; ?>
+console.groupEnd();
+</script>
+<?php endif; ?>
 
 <?php if ( $convert_result && ! empty( $convert_result['debug_log'] ) ) : ?>
 <script>

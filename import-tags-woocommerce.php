@@ -51,6 +51,7 @@ function itwc_init() {
     require_once ITWC_PLUGIN_DIR . 'includes/class-csv-importer.php';
     require_once ITWC_PLUGIN_DIR . 'includes/class-standard-size-assigner.php';
     require_once ITWC_PLUGIN_DIR . 'includes/class-simple-to-variable-converter.php';
+    require_once ITWC_PLUGIN_DIR . 'includes/class-variation-order-sync.php';
 
     add_action( 'admin_menu', 'itwc_add_admin_menu' );
     add_action( 'admin_enqueue_scripts', 'itwc_enqueue_admin_styles' );

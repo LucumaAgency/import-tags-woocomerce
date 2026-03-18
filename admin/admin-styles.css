@@ -71,6 +71,11 @@
     color: #856404;
 }
 
+.itwc-status-synced {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
 .itwc-row-error td {
     background-color: #fff5f5;
 }
